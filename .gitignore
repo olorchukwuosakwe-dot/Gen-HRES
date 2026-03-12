@@ -1,0 +1,16 @@
+# Ignore Mac System Files
+.DS_Store
+
+# Ignore raw NASA Data Folder
+nasa_power_data/
+
+# Ignore Preprocessed and Synthetic Datasets
+*.csv
+*.npy
+
+# Ignore PyTorch Model Weights
+*.pth
+
+# Ignore Python Cache
+__pycache__/
+*.pyc
