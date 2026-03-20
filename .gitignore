@@ -1,6 +1,8 @@
 # Ignore Mac System Files
 .DS_Store
 
+venv/
+
 # Ignore raw NASA Data Folder
 nasa_power_data/
 
