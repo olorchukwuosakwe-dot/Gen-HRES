@@ -31,6 +31,7 @@ for loc in ["Kano", "Lagos"]:
             break
     
     df = pd.read_csv(path, skiprows=11, encoding="utf-8")
+    print(df)
     df.columns = [col.strip() for col in df.columns]
 
     # --- FIX 2: Handle NASA's -999.0 missing values ---
@@ -47,10 +48,10 @@ for loc in ["Kano", "Lagos"]:
     
     # Create datetime
     df["Date"] = pd.to_datetime(
-        df["Year"].astype(str) + "-" +
-        df["Month"].astype(str) + "-" +
-        df["Day"].astype(str) + " " +
-        df["Hour"].astype(str) + ":00:00"
+        df["YEAR"].astype(str) + "-" +
+        df["MO"].astype(str) + "-" +
+        df["DY"].astype(str) + " " +
+        df["HR"].astype(str) + ":00:00"
     )
     dfs.append(df)
 
