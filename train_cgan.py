@@ -7,12 +7,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 batch_size = 64
 lr_G = 0.00005
 lr_D = 0.00002
-epochs = 1500
+epochs = 1500 # NOTE: 1500 epochs can take a very long time on a CPU. Consider reducing for testing.
 noise_dim = 100
 hidden_dim = 64
 num_conditions = 2
@@ -82,53 +83,65 @@ def gradient_penalty(D, real_profiles, fake_profiles, cond):
     gradients = gradients.reshape(gradients.size(0), -1)
     return ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
-print("Starting stable WGAN-GP LSTM training (90%+ ACF target)...")
+print(f"Starting stable WGAN-GP LSTM training on {device} for {epochs} epochs...")
 for epoch in range(epochs):
-    for real_profiles, cond in dataloader:
+    G.train()
+    D.train()
+
+    epoch_d_loss, epoch_g_loss, epoch_corr_loss = 0.0, 0.0, 0.0
+
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", leave=False)
+    for real_profiles, cond in pbar:
         real_profiles = real_profiles.to(device)
         cond = cond.to(device)
-        bs = real_profiles.size(0)
 
         # Train Discriminator 5 times per generator step
         for _ in range(5):
-            noise = torch.randn(bs, noise_dim).to(device)
+            opt_D.zero_grad()
+            noise = torch.randn(real_profiles.size(0), noise_dim).to(device)
             fake_profiles = G(noise, cond).detach()
-            
+
             d_real = D(real_profiles, cond)
             d_fake = D(fake_profiles, cond)
-            
+
             gp = gradient_penalty(D, real_profiles, fake_profiles, cond)
             d_loss = d_fake.mean() - d_real.mean() + gp_weight * gp
-            
-            opt_D.zero_grad()
+
             d_loss.backward()
             opt_D.step()
 
         # Train Generator
-        noise = torch.randn(bs, noise_dim).to(device)
+        opt_G.zero_grad()
+        noise = torch.randn(real_profiles.size(0), noise_dim).to(device)
         fake_profiles = G(noise, cond)
         d_fake = D(fake_profiles, cond)
         g_loss = -d_fake.mean()
 
         # Temporal smoothness + correlation loss
-        temporal_loss = nn.MSELoss()(fake_profiles[:, 1:, :], fake_profiles[:, :-1, :]) * 0.05
-        
+        temporal_loss = nn.functional.mse_loss(fake_profiles[:, 1:, :], fake_profiles[:, :-1, :]) * 0.05
+
         real_wind = real_profiles[:, :, 1]
         real_temp = real_profiles[:, :, 2]
         fake_wind = fake_profiles[:, :, 1]
         fake_temp = fake_profiles[:, :, 2]
-        real_corr = torch.corrcoef(torch.stack([real_wind.view(-1), real_temp.view(-1)]))[0,1]
-        fake_corr = torch.corrcoef(torch.stack([fake_wind.view(-1), fake_temp.view(-1)]))[0,1]
+        real_corr = torch.corrcoef(torch.stack([real_wind.flatten(), real_temp.flatten()]))[0,1]
+        fake_corr = torch.corrcoef(torch.stack([fake_wind.flatten(), fake_temp.flatten()]))[0,1]
         corr_loss = torch.abs(real_corr - fake_corr)
 
-        g_loss = g_loss + temporal_loss + (0.8 * corr_loss)
+        total_g_loss = g_loss + temporal_loss + (0.8 * corr_loss)
 
-        opt_G.zero_grad()
-        g_loss.backward()
+        total_g_loss.backward()
         opt_G.step()
 
-    if (epoch + 1) % 50 == 0:
-        print(f"Epoch {epoch+1}/{epochs} | D_loss: {d_loss.item():.4f} | G_loss: {g_loss.item():.4f} | Corr_Loss: {corr_loss.item():.4f}")
+        epoch_d_loss += d_loss.item()
+        epoch_g_loss += total_g_loss.item()
+        epoch_corr_loss += corr_loss.item()
+        pbar.set_postfix(D_loss=f'{d_loss.item():.4f}', G_loss=f'{total_g_loss.item():.4f}')
+
+    avg_d_loss = epoch_d_loss / len(dataloader)
+    avg_g_loss = epoch_g_loss / len(dataloader)
+    avg_corr_loss = epoch_corr_loss / len(dataloader)
+    print(f"Epoch {epoch+1}/{epochs} | Avg D_loss: {avg_d_loss:.4f} | Avg G_loss: {avg_g_loss:.4f} | Avg Corr_Loss: {avg_corr_loss:.4f}")
 
 torch.save(G.state_dict(), 'cgan_generator_wgangp_final.pth')
 print("\n✅ Stable WGAN-GP model saved!")
